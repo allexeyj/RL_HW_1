@@ -63,8 +63,8 @@ def run_ql_experiment():
     epsilon = 1.0
     epsilon_min = 0.01
     epsilon_decay = 0.995
-    runs = 3
-    episodes = 50
+    runs = 1
+    episodes = 5
 
     env = sumo_rl.parallel_env(
         net_file="nets/4x4-Lucas/4x4.net.xml",
@@ -87,41 +87,42 @@ def run_ql_experiment():
                 epsilon_min=epsilon_min,
                 epsilon_decay=epsilon_decay,
             )
-            for ts in env.agents
+            for ts in env.possible_agents
         }
 
         for ep in range(1, episodes + 1):
             observations, infos = env.reset()
-            done = {ts: False for ts in env.agents}
-            episode_rewards = {ts: 0 for ts in env.agents}
 
-            while not all(done.values()):
+            done = {ts: False for ts in env.possible_agents}
+            episode_rewards = {ts: 0 for ts in env.possible_agents}
+
+            while env.agents:
                 actions = {
                     ts: agents[ts].act(str(observations[ts]))
-                    for ts in env.agents if not done[ts]
+                    for ts in env.agents
+                    if ts in observations
                 }
 
                 next_obs, rewards, terminations, truncations, infos = env.step(actions)
 
-                for ts in env.agents:
-                    if not done[ts]:
-                        agents[ts].learn(
-                            str(observations[ts]),
-                            actions[ts],
-                            rewards[ts],
-                            str(next_obs[ts]),
-                            terminations[ts] or truncations[ts]
-                        )
-                        episode_rewards[ts] += rewards[ts]
-                        done[ts] = terminations[ts] or truncations[ts]
+                for ts in next_obs.keys():
+                    agents[ts].learn(
+                        str(observations[ts]),
+                        actions[ts],
+                        rewards[ts],
+                        str(next_obs[ts]),
+                        terminations[ts] or truncations[ts]
+                    )
+                    episode_rewards[ts] += rewards[ts]
+                    done[ts] = terminations[ts] or truncations[ts]
 
                 observations = next_obs
 
-            for ts in env.agents:
-                agents[ts].decay_epsilon()
+            for agent in agents.values():
+                agent.decay_epsilon()
 
             total_reward = sum(episode_rewards.values())
-            eps = agents[list(agents.keys())[0]].epsilon
+            eps = list(agents.values())[0].epsilon if agents else 0
             print(f"Episode {ep}/{episodes}, Total Reward: {total_reward:.2f}, Epsilon: {eps:.4f}")
 
     env.close()
