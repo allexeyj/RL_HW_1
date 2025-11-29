@@ -70,7 +70,7 @@ def run_ql_experiment():
         net_file="nets/4x4-Lucas/4x4.net.xml",
         route_file="nets/4x4-Lucas/4x4c1c2c1c2.rou.xml",
         use_gui=False,
-        num_seconds=80000,
+        num_seconds=3600,
         out_csv_name="outputs/4x4grid_ql",
     )
 
