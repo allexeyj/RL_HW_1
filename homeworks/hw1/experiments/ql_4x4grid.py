@@ -9,20 +9,20 @@ else:
 
 import numpy as np
 from collections import defaultdict
+from tqdm import tqdm
 import sumo_rl
 
 
 class QLearningAgent:
-
     def __init__(
-            self,
-            state_space,
-            action_space,
-            alpha=0.1,
-            gamma=0.99,
-            epsilon=1.0,
-            epsilon_min=0.01,
-            epsilon_decay=0.995,
+        self,
+        state_space,
+        action_space,
+        alpha=0.1,
+        gamma=0.99,
+        epsilon=1.0,
+        epsilon_min=0.01,
+        epsilon_decay=0.995,
     ):
         self.state_space = state_space
         self.action_space = action_space
@@ -90,11 +90,13 @@ def run_ql_experiment():
             for ts in env.possible_agents
         }
 
-        for ep in range(1, episodes + 1):
+        for ep in tqdm(range(1, episodes + 1), desc="Episodes", unit="ep"):
             observations, infos = env.reset()
 
             done = {ts: False for ts in env.possible_agents}
             episode_rewards = {ts: 0 for ts in env.possible_agents}
+
+            step_pbar = tqdm(desc="Steps", unit="step", leave=False)
 
             while env.agents:
                 actions = {
@@ -111,19 +113,22 @@ def run_ql_experiment():
                         actions[ts],
                         rewards[ts],
                         str(next_obs[ts]),
-                        terminations[ts] or truncations[ts]
+                        terminations[ts] or truncations[ts],
                     )
                     episode_rewards[ts] += rewards[ts]
                     done[ts] = terminations[ts] or truncations[ts]
 
                 observations = next_obs
+                step_pbar.update(1)
+
+            step_pbar.close()
 
             for agent in agents.values():
                 agent.decay_epsilon()
 
             total_reward = sum(episode_rewards.values())
             eps = list(agents.values())[0].epsilon if agents else 0
-            print(f"Episode {ep}/{episodes}, Total Reward: {total_reward:.2f}, Epsilon: {eps:.4f}")
+            tqdm.write(f"Episode {ep}/{episodes}, Total Reward: {total_reward:.2f}, Epsilon: {eps:.4f}")
 
     env.close()
 
