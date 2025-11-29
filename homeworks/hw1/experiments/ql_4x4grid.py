@@ -22,7 +22,7 @@ class QLearningAgent:
             gamma=0.99,
             epsilon=1.0,
             epsilon_min=0.05,
-            epsilon_decay=0.95,
+            epsilon_decay=0.995,
     ):
         self.state_space = state_space
         self.action_space = action_space
@@ -53,9 +53,24 @@ class QLearningAgent:
     def decay_epsilon(self):
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
+    def get_q_table_size(self):
+        return len(self.q_table)
 
-def discretize_observation(observation, decimals=1):
-    return str([round(x, decimals) for x in observation])
+
+def discretize_observation(observation, bins=3):
+    """
+    Более грубая дискретизация - разбиваем на bins категорий
+    low/medium/high вместо точных значений
+    """
+    discretized = []
+    for x in observation:
+        if x < 0.33:
+            discretized.append(0)
+        elif x < 0.66:
+            discretized.append(1)
+        else:
+            discretized.append(2)
+    return tuple(discretized)
 
 
 def run_ql_experiment():
@@ -63,12 +78,12 @@ def run_ql_experiment():
     gamma = 0.99
 
     runs = 1
-    episodes = 20
+    episodes = 200
     sim_seconds = 3000
 
     epsilon = 1.0
-    epsilon_min = 0.01
-    epsilon_decay = 0.85
+    epsilon_min = 0.05
+    epsilon_decay = 0.995
 
     env = sumo_rl.parallel_env(
         net_file="nets/4x4-Lucas/4x4.net.xml",
@@ -77,6 +92,8 @@ def run_ql_experiment():
         num_seconds=sim_seconds,
         out_csv_name="outputs/4x4grid_ql",
     )
+
+    reward_history = []
 
     for run in range(1, runs + 1):
         print(f"\n=== Run {run}/{runs} ===")
@@ -96,50 +113,60 @@ def run_ql_experiment():
 
         for ep in tqdm(range(1, episodes + 1), desc="Episodes"):
             observations, infos = env.reset()
-            done = {ts: False for ts in env.possible_agents}
             episode_rewards = {ts: 0 for ts in env.possible_agents}
 
-            state_str = {ts: discretize_observation(observations[ts]) for ts in env.possible_agents}
+            state_keys = {
+                ts: discretize_observation(observations[ts])
+                for ts in env.possible_agents
+            }
 
-            with tqdm(total=sim_seconds, desc=f"Ep {ep} Sim", leave=False, mininterval=1.0) as pbar:
-                while env.agents:
-                    actions = {
-                        ts: agents[ts].act(state_str[ts])
-                        for ts in env.agents
-                        if ts in observations
-                    }
+            step_count = 0
+            while env.agents:
+                actions = {
+                    ts: agents[ts].act(state_keys[ts])
+                    for ts in env.agents
+                    if ts in observations
+                }
 
-                    next_obs, rewards, terminations, truncations, infos = env.step(actions)
+                next_obs, rewards, terminations, truncations, infos = env.step(actions)
 
-                    for ts in next_obs.keys():
-                        next_state_key = discretize_observation(next_obs[ts])
+                for ts in next_obs.keys():
+                    next_state_key = discretize_observation(next_obs[ts])
+                    done = terminations[ts] or truncations[ts]
 
-                        agents[ts].learn(
-                            state_str[ts],
-                            actions[ts],
-                            rewards[ts],
-                            next_state_key,
-                            terminations[ts] or truncations[ts]
-                        )
+                    agents[ts].learn(
+                        state_keys[ts],
+                        actions[ts],
+                        rewards[ts],
+                        next_state_key,
+                        done
+                    )
 
-                        episode_rewards[ts] += rewards[ts]
-                        done[ts] = terminations[ts] or truncations[ts]
+                    episode_rewards[ts] += rewards[ts]
+                    state_keys[ts] = next_state_key
 
-                        state_str[ts] = next_state_key
-
-                    observations = next_obs
-                    pbar.update(5)
+                observations = next_obs
+                step_count += 1
 
             for agent in agents.values():
                 agent.decay_epsilon()
 
             total_reward = sum(episode_rewards.values())
-            eps = list(agents.values())[0].epsilon if agents else 0
+            reward_history.append(total_reward)
 
-            print(f"  --> Episode {ep} Done. Total Reward: {total_reward:.2f}, Epsilon: {eps:.4f}")
+            if ep % 10 == 0:
+                avg_reward = np.mean(reward_history[-10:])
+                q_table_sizes = [a.get_q_table_size() for a in agents.values()]
+                eps = list(agents.values())[0].epsilon
+
+                print(f"  Ep {ep}: Avg Reward (last 10): {avg_reward:.2f}, "
+                      f"Epsilon: {eps:.4f}, "
+                      f"Q-table sizes: {sum(q_table_sizes)} total states")
 
     env.close()
 
+    return reward_history, agents
+
 
 if __name__ == "__main__":
-    run_ql_experiment()
+    rewards, agents = run_ql_experiment()
