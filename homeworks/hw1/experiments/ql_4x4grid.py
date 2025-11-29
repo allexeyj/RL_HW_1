@@ -63,7 +63,7 @@ def run_ql_experiment():
     runs = 1
     episodes = 5
 
-    sim_seconds = 10_000
+    sim_seconds = 80_000
 
     env = sumo_rl.parallel_env(
         net_file="nets/4x4-Lucas/4x4.net.xml",
