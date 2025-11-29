@@ -76,7 +76,6 @@ def run_ql_experiment():
 
     for run in range(1, runs + 1):
         print(f"\n=== Run {run}/{runs} ===")
-        observations, infos = env.reset()
 
         agents = {
             ts: QLearningAgent(

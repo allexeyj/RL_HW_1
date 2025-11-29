@@ -175,8 +175,8 @@ def run_dqn_experiment():
     episodes = 30
 
     env = sumo_rl.SumoEnvironment(
-        net_file="homeworks/hw1/big-intersection/big-intersection.net.xml",
-        route_file="homeworks/hw1/big-intersection/routes.rou.xml",
+        net_file="big-intersection/big-intersection.net.xml",
+        route_file="big-intersection/routes.rou.xml",
         use_gui=False,
         num_seconds=5400,
         min_green=5,
