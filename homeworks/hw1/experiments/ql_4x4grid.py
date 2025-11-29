@@ -1,7 +1,5 @@
 import os
 import sys
-import pickle
-from datetime import datetime
 
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
@@ -115,9 +113,7 @@ def run_ql_experiment():
     best_avg_reward = -float('inf')
 
     for run in range(1, runs + 1):
-        print(f"\n{'=' * 50}")
-        print(f"=== Run {run}/{runs} ===")
-        print(f"{'=' * 50}")
+        print(f"Run {run}/{runs}")
 
         agents = {
             ts: QLearningAgent(
@@ -190,7 +186,7 @@ def run_ql_experiment():
 
                 if avg_reward > best_avg_reward:
                     best_avg_reward = avg_reward
-                    improvement = "NEW BEST!"
+                    improvement = "Новый лучший"
                 else:
                     improvement = ""
 
@@ -201,9 +197,7 @@ def run_ql_experiment():
 
     env.close()
 
-    print("\n" + "=" * 50)
-    print("TRAINING COMPLETE")
-    print("=" * 50)
+
     print(f"Final epsilon: {list(agents.values())[0].epsilon:.4f}")
     print(f"Best avg reward: {best_avg_reward:.2f}")
     print(f"Final avg reward (last 10): {np.mean(reward_history[-10:]):.2f}")
