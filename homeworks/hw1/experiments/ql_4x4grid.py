@@ -21,8 +21,8 @@ class QLearningAgent:
             alpha=0.1,
             gamma=0.99,
             epsilon=1.0,
-            epsilon_min=0.01,
-            epsilon_decay=0.995,
+            epsilon_min=0.05,
+            epsilon_decay=0.95,
     ):
         self.state_space = state_space
         self.action_space = action_space
@@ -54,16 +54,21 @@ class QLearningAgent:
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
 
+def discretize_observation(observation, decimals=1):
+    return str([round(x, decimals) for x in observation])
+
+
 def run_ql_experiment():
     alpha = 0.1
     gamma = 0.99
+
+    runs = 1
+    episodes = 20
+    sim_seconds = 3000
+
     epsilon = 1.0
     epsilon_min = 0.01
-    epsilon_decay = 0.995
-    runs = 1
-    episodes = 5
-
-    sim_seconds = 80_000
+    epsilon_decay = 0.85
 
     env = sumo_rl.parallel_env(
         net_file="nets/4x4-Lucas/4x4.net.xml",
@@ -89,16 +94,17 @@ def run_ql_experiment():
             for ts in env.possible_agents
         }
 
-        for ep in tqdm(range(1, episodes + 1), desc="Total Episodes"):
+        for ep in tqdm(range(1, episodes + 1), desc="Episodes"):
             observations, infos = env.reset()
             done = {ts: False for ts in env.possible_agents}
             episode_rewards = {ts: 0 for ts in env.possible_agents}
 
+            state_str = {ts: discretize_observation(observations[ts]) for ts in env.possible_agents}
 
-            with tqdm(total=sim_seconds, desc=f"Simulating Ep {ep}", leave=False, mininterval=1.0) as pbar:
+            with tqdm(total=sim_seconds, desc=f"Ep {ep} Sim", leave=False, mininterval=1.0) as pbar:
                 while env.agents:
                     actions = {
-                        ts: agents[ts].act(str(observations[ts]))
+                        ts: agents[ts].act(state_str[ts])
                         for ts in env.agents
                         if ts in observations
                     }
@@ -106,18 +112,22 @@ def run_ql_experiment():
                     next_obs, rewards, terminations, truncations, infos = env.step(actions)
 
                     for ts in next_obs.keys():
+                        next_state_key = discretize_observation(next_obs[ts])
+
                         agents[ts].learn(
-                            str(observations[ts]),
+                            state_str[ts],
                             actions[ts],
                             rewards[ts],
-                            str(next_obs[ts]),
+                            next_state_key,
                             terminations[ts] or truncations[ts]
                         )
+
                         episode_rewards[ts] += rewards[ts]
                         done[ts] = terminations[ts] or truncations[ts]
 
-                    observations = next_obs
+                        state_str[ts] = next_state_key
 
+                    observations = next_obs
                     pbar.update(5)
 
             for agent in agents.values():
