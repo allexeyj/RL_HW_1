@@ -1,6 +1,8 @@
 import os
 import sys
 
+os.environ["LIBSUMO_AS_TRACI"] = "1"
+
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
     sys.path.append(tools)
@@ -123,7 +125,7 @@ class PrioritizedReplayBuffer:
 
 
 class DuelingDQN(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim=256):
+    def __init__(self, state_dim, action_dim, hidden_dim=128):
         super().__init__()
 
         self.feature = nn.Sequential(
@@ -158,19 +160,19 @@ class DQNAgent:
             self,
             state_dim,
             action_dim,
-            hidden_dim=256,
-            lr=1e-4,
+            hidden_dim=128,
+            lr=3e-4,
             gamma=0.95,
             epsilon_start=1.0,
             epsilon_end=0.05,
-            epsilon_decay_steps=30000,
-            buffer_size=100000,
-            batch_size=128,
+            epsilon_decay_steps=10000,
+            buffer_size=50000,
+            batch_size=64,
             target_update_freq=100,
             double_dqn=True,
             use_prioritized=True,
-            warmup_steps=2000,
-            tau=0.005,
+            warmup_steps=500,
+            tau=0.01,
             reward_scale=0.01,
             normalize_states=True,
     ):
@@ -424,7 +426,6 @@ def run_dqn_experiment():
 
             while not done:
                 action = agent.act(state)
-
                 step_result = env.step(action)
 
                 if len(step_result) == 5:
@@ -434,11 +435,12 @@ def run_dqn_experiment():
                     next_state, reward, done, info = step_result
 
                 agent.store(state, action, reward, next_state, done)
-                loss = agent.learn()
 
-                if loss > 0:
-                    episode_loss += loss
-                    loss_count += 1
+                if steps % 4 == 0:
+                    loss = agent.learn()
+                    if loss > 0:
+                        episode_loss += loss
+                        loss_count += 1
 
                 episode_reward += reward
                 state = next_state
@@ -470,19 +472,9 @@ def run_dqn_experiment():
                 best_reward = episode_reward
                 agent.save(f"models/dqn_run{run}_best.pth")
 
-            if ep >= 100 and ep % 50 == 0:
-                recent_avg = np.mean(run_rewards[-50:])
-                older_avg = np.mean(run_rewards[-100:-50])
-                if abs(recent_avg - older_avg) < abs(older_avg) * 0.02 and agent.epsilon <= epsilon_end + 0.01:
-                    print(f"Early stopping: converged at episode {ep}")
-                    break
-
         all_rewards.append(run_rewards)
-
         agent.save(f"models/dqn_run{run}_final.pth")
-
         np.save(f"outputs/rewards_run{run}.npy", np.array(run_rewards))
-
 
     for run in range(runs):
         rewards = all_rewards[run]
