@@ -295,6 +295,7 @@ def run_dqn_experiment():
         min_green=5,
         delta_time=5,
         out_csv_name="outputs/big_intersection_dqn",
+        single_agent=True
     )
 
     state_dim = env.observation_space.shape[0]
@@ -302,7 +303,6 @@ def run_dqn_experiment():
 
     print(f"State dim: {state_dim}, Action dim: {action_dim}")
     print(f"Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
-    print(f"Improvements: Dueling DQN, Double DQN, PER, Soft Update")
 
     all_rewards = []
 
