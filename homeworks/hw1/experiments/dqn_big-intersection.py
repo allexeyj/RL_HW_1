@@ -436,11 +436,10 @@ def run_dqn_experiment():
 
                 agent.store(state, action, reward, next_state, done)
 
-                if steps % 4 == 0:
-                    loss = agent.learn()
-                    if loss > 0:
-                        episode_loss += loss
-                        loss_count += 1
+                loss = agent.learn()
+                if loss > 0:
+                    episode_loss += loss
+                    loss_count += 1
 
                 episode_reward += reward
                 state = next_state
