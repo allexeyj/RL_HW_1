@@ -46,7 +46,8 @@ class RunningNormalizer:
         self.count = total_count
 
     def normalize(self, x):
-        return (x - self.mean) / (np.sqrt(self.var) + self.epsilon)
+        normalized = (x - self.mean) / (np.sqrt(self.var) + self.epsilon)
+        return np.clip(normalized, -10, 10)
 
 
 class ReplayBuffer:
@@ -161,18 +162,18 @@ class DQNAgent:
             state_dim,
             action_dim,
             hidden_dim=128,
-            lr=3e-4,
-            gamma=0.95,
+            lr=1e-4,
+            gamma=0.99,
             epsilon_start=1.0,
-            epsilon_end=0.05,
-            epsilon_decay_steps=10000,
-            buffer_size=50000,
-            batch_size=64,
+            epsilon_end=0.01,
+            epsilon_decay_steps=60000,
+            buffer_size=100000,
+            batch_size=128,
             target_update_freq=100,
             double_dqn=True,
             use_prioritized=True,
-            warmup_steps=500,
-            tau=0.01,
+            warmup_steps=1000,
+            tau=0.005,
             reward_scale=0.01,
             normalize_states=True,
     ):
@@ -204,7 +205,6 @@ class DQNAgent:
         self.target_network.eval()
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
-        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=10000, gamma=0.9)
         self.loss_fn = nn.SmoothL1Loss(reduction='none')
 
         if use_prioritized:
@@ -216,12 +216,6 @@ class DQNAgent:
             self.state_normalizer = RunningNormalizer(state_dim)
         else:
             self.state_normalizer = None
-
-    def _normalize_state(self, state):
-        if self.state_normalizer is not None:
-            self.state_normalizer.update(state)
-            return self.state_normalizer.normalize(state)
-        return state
 
     def act(self, state):
         self.total_steps += 1
@@ -235,7 +229,11 @@ class DQNAgent:
         if np.random.random() < self.epsilon:
             return np.random.randint(self.action_dim)
 
-        normalized_state = self._normalize_state(state)
+        if self.state_normalizer is not None:
+            normalized_state = self.state_normalizer.normalize(state)
+        else:
+            normalized_state = state
+
         state_tensor = torch.FloatTensor(normalized_state).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
@@ -246,19 +244,12 @@ class DQNAgent:
         normalized_reward = np.clip(reward * self.reward_scale, -10, 10)
 
         if self.state_normalizer is not None:
-            norm_state = self.state_normalizer.normalize(state)
-            norm_next_state = self.state_normalizer.normalize(next_state)
-        else:
-            norm_state = state
-            norm_next_state = next_state
+            self.state_normalizer.update(state)
 
-        self.replay_buffer.push(norm_state, action, normalized_reward, norm_next_state, done)
+        self.replay_buffer.push(state, action, normalized_reward, next_state, done)
 
     def learn(self):
-        if len(self.replay_buffer) < self.warmup_steps:
-            return 0.0
-
-        if len(self.replay_buffer) < self.batch_size:
+        if len(self.replay_buffer) < max(self.warmup_steps, self.batch_size):
             return 0.0
 
         if self.use_prioritized:
@@ -270,6 +261,10 @@ class DQNAgent:
             states, actions, rewards, next_states, dones = \
                 self.replay_buffer.sample(self.batch_size)
             weights = torch.ones(self.batch_size).to(self.device)
+
+        if self.state_normalizer is not None:
+            states = self.state_normalizer.normalize(states)
+            next_states = self.state_normalizer.normalize(next_states)
 
         states = torch.FloatTensor(states).to(self.device)
         actions = torch.LongTensor(actions).to(self.device)
@@ -295,7 +290,6 @@ class DQNAgent:
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), 10.0)
         self.optimizer.step()
-        self.scheduler.step()
 
         if self.use_prioritized:
             self.replay_buffer.update_priorities(indices, td_errors.detach().cpu().numpy())
@@ -319,7 +313,6 @@ class DQNAgent:
             'q_network': self.q_network.state_dict(),
             'target_network': self.target_network.state_dict(),
             'optimizer': self.optimizer.state_dict(),
-            'scheduler': self.scheduler.state_dict(),
             'epsilon': self.epsilon,
             'learn_step': self.learn_step,
             'total_steps': self.total_steps,
@@ -333,7 +326,6 @@ class DQNAgent:
         self.q_network.load_state_dict(checkpoint['q_network'])
         self.target_network.load_state_dict(checkpoint['target_network'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
-        self.scheduler.load_state_dict(checkpoint['scheduler'])
         self.epsilon = checkpoint['epsilon']
         self.learn_step = checkpoint['learn_step']
         self.total_steps = checkpoint['total_steps']
@@ -345,17 +337,17 @@ class DQNAgent:
 
 def run_dqn_experiment():
     hidden_dim = 256
-    lr = 5e-5
+    lr = 1e-4
     gamma = 0.99
     epsilon_start = 1.0
     epsilon_end = 0.01
-    epsilon_decay_steps = 40000
+    epsilon_decay_steps = 60000
     buffer_size = 100000
     batch_size = 128
     target_update_freq = 100
     warmup_steps = 1000
-    tau = 0.001
-    reward_scale = 0.005
+    tau = 0.005
+    reward_scale = 0.01
     normalize_states = True
 
     runs = 1
