@@ -208,37 +208,6 @@ def run_ql_experiment():
     return reward_history, agents
 
 
-def plot_results(reward_history, window=10):
-    import matplotlib.pyplot as plt
-
-    smoothed = np.convolve(
-        reward_history,
-        np.ones(window) / window,
-        mode='valid'
-    )
-
-    plt.figure(figsize=(12, 5))
-
-    plt.subplot(1, 2, 1)
-    plt.plot(reward_history, alpha=0.3, label='Raw')
-    plt.plot(range(window - 1, len(reward_history)), smoothed, label=f'MA({window})')
-    plt.xlabel('Episode')
-    plt.ylabel('Total Reward')
-    plt.title('Training Progress')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-
-    plt.subplot(1, 2, 2)
-    plt.hist(reward_history, bins=30, edgecolor='black')
-    plt.xlabel('Total Reward')
-    plt.ylabel('Frequency')
-    plt.title('Reward Distribution')
-    plt.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig('outputs/ql_training_results.png', dpi=150)
-    plt.show()
-
 
 if __name__ == "__main__":
     rewards, agents = run_ql_experiment()
