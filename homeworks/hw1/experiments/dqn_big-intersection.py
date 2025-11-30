@@ -16,14 +16,45 @@ import random
 import sumo_rl
 
 
+class RunningNormalizer:
+    def __init__(self, dim, epsilon=1e-8):
+        self.mean = np.zeros(dim)
+        self.var = np.ones(dim)
+        self.count = epsilon
+        self.epsilon = epsilon
+
+    def update(self, x):
+        if x.ndim == 1:
+            batch_mean = x
+            batch_var = np.zeros_like(x)
+            batch_count = 1
+        else:
+            batch_mean = np.mean(x, axis=0)
+            batch_var = np.var(x, axis=0)
+            batch_count = x.shape[0]
+
+        delta = batch_mean - self.mean
+        total_count = self.count + batch_count
+
+        self.mean = self.mean + delta * batch_count / total_count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + delta ** 2 * self.count * batch_count / total_count
+        self.var = M2 / total_count
+        self.count = total_count
+
+    def normalize(self, x):
+        return (x - self.mean) / (np.sqrt(self.var) + self.epsilon)
+
+
 class ReplayBuffer:
-    def __init__(self, capacity: int):
+    def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
 
     def push(self, state, action, reward, next_state, done):
         self.buffer.append((state, action, reward, next_state, done))
 
-    def sample(self, batch_size: int):
+    def sample(self, batch_size):
         batch = random.sample(self.buffer, batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
         return (
@@ -39,7 +70,7 @@ class ReplayBuffer:
 
 
 class PrioritizedReplayBuffer:
-    def __init__(self, capacity: int, alpha: float = 0.6):
+    def __init__(self, capacity, alpha=0.6):
         self.capacity = capacity
         self.alpha = alpha
         self.buffer = []
@@ -58,7 +89,10 @@ class PrioritizedReplayBuffer:
 
         self.position = (self.position + 1) % self.capacity
 
-    def sample(self, batch_size: int, beta: float = 0.4):
+    def sample(self, batch_size, beta=0.4):
+        if batch_size > len(self.buffer):
+            batch_size = len(self.buffer)
+
         priorities = np.array(self.priorities) ** self.alpha
         probs = priorities / priorities.sum()
 
@@ -89,7 +123,7 @@ class PrioritizedReplayBuffer:
 
 
 class DuelingDQN(nn.Module):
-    def __init__(self, state_dim: int, action_dim: int, hidden_dim: int = 256):
+    def __init__(self, state_dim, action_dim, hidden_dim=256):
         super().__init__()
 
         self.feature = nn.Sequential(
@@ -122,25 +156,29 @@ class DuelingDQN(nn.Module):
 class DQNAgent:
     def __init__(
             self,
-            state_dim: int,
-            action_dim: int,
-            hidden_dim: int = 256,
-            lr: float = 3e-4,
-            gamma: float = 0.99,
-            epsilon_start: float = 1.0,
-            epsilon_end: float = 0.01,
-            epsilon_decay_steps: int = 10000,
-            buffer_size: int = 100000,
-            batch_size: int = 64,
-            target_update_freq: int = 100,
-            double_dqn: bool = True,
-            use_prioritized: bool = True,
-            warmup_steps: int = 1000,
-            tau: float = 0.005,
+            state_dim,
+            action_dim,
+            hidden_dim=256,
+            lr=1e-4,
+            gamma=0.95,
+            epsilon_start=1.0,
+            epsilon_end=0.05,
+            epsilon_decay_steps=30000,
+            buffer_size=100000,
+            batch_size=128,
+            target_update_freq=100,
+            double_dqn=True,
+            use_prioritized=True,
+            warmup_steps=2000,
+            tau=0.005,
+            reward_scale=0.01,
+            normalize_states=True,
     ):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.gamma = gamma
+        self.reward_scale = reward_scale
+        self.normalize_states = normalize_states
 
         self.epsilon_start = epsilon_start
         self.epsilon_end = epsilon_end
@@ -164,6 +202,7 @@ class DQNAgent:
         self.target_network.eval()
 
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
+        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=10000, gamma=0.9)
         self.loss_fn = nn.SmoothL1Loss(reduction='none')
 
         if use_prioritized:
@@ -171,7 +210,18 @@ class DQNAgent:
         else:
             self.replay_buffer = ReplayBuffer(buffer_size)
 
-    def act(self, state: np.ndarray) -> int:
+        if normalize_states:
+            self.state_normalizer = RunningNormalizer(state_dim)
+        else:
+            self.state_normalizer = None
+
+    def _normalize_state(self, state):
+        if self.state_normalizer is not None:
+            self.state_normalizer.update(state)
+            return self.state_normalizer.normalize(state)
+        return state
+
+    def act(self, state):
         self.total_steps += 1
 
         self.epsilon = max(
@@ -183,15 +233,26 @@ class DQNAgent:
         if np.random.random() < self.epsilon:
             return np.random.randint(self.action_dim)
 
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        normalized_state = self._normalize_state(state)
+        state_tensor = torch.FloatTensor(normalized_state).unsqueeze(0).to(self.device)
+
         with torch.no_grad():
             q_values = self.q_network(state_tensor)
         return q_values.argmax().item()
 
     def store(self, state, action, reward, next_state, done):
-        self.replay_buffer.push(state, action, reward, next_state, done)
+        normalized_reward = np.clip(reward * self.reward_scale, -10, 10)
 
-    def learn(self) -> float:
+        if self.state_normalizer is not None:
+            norm_state = self.state_normalizer.normalize(state)
+            norm_next_state = self.state_normalizer.normalize(next_state)
+        else:
+            norm_state = state
+            norm_next_state = next_state
+
+        self.replay_buffer.push(norm_state, action, normalized_reward, norm_next_state, done)
+
+    def learn(self):
         if len(self.replay_buffer) < self.warmup_steps:
             return 0.0
 
@@ -232,6 +293,7 @@ class DQNAgent:
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), 10.0)
         self.optimizer.step()
+        self.scheduler.step()
 
         if self.use_prioritized:
             self.replay_buffer.update_priorities(indices, td_errors.detach().cpu().numpy())
@@ -250,39 +312,52 @@ class DQNAgent:
                                        self.q_network.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
-    def save(self, path: str):
+    def save(self, path):
         torch.save({
             'q_network': self.q_network.state_dict(),
             'target_network': self.target_network.state_dict(),
             'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
             'epsilon': self.epsilon,
             'learn_step': self.learn_step,
+            'total_steps': self.total_steps,
+            'state_normalizer_mean': self.state_normalizer.mean if self.state_normalizer else None,
+            'state_normalizer_var': self.state_normalizer.var if self.state_normalizer else None,
+            'state_normalizer_count': self.state_normalizer.count if self.state_normalizer else None,
         }, path)
 
-    def load(self, path: str):
+    def load(self, path):
         checkpoint = torch.load(path)
         self.q_network.load_state_dict(checkpoint['q_network'])
         self.target_network.load_state_dict(checkpoint['target_network'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
+        self.scheduler.load_state_dict(checkpoint['scheduler'])
         self.epsilon = checkpoint['epsilon']
         self.learn_step = checkpoint['learn_step']
+        self.total_steps = checkpoint['total_steps']
+        if self.state_normalizer and checkpoint['state_normalizer_mean'] is not None:
+            self.state_normalizer.mean = checkpoint['state_normalizer_mean']
+            self.state_normalizer.var = checkpoint['state_normalizer_var']
+            self.state_normalizer.count = checkpoint['state_normalizer_count']
 
 
 def run_dqn_experiment():
     hidden_dim = 256
     lr = 1e-4
-    gamma = 0.99
+    gamma = 0.95
     epsilon_start = 1.0
-    epsilon_end = 0.01
-    epsilon_decay_steps = 50000
+    epsilon_end = 0.05
+    epsilon_decay_steps = 30000
     buffer_size = 100000
-    batch_size = 64
+    batch_size = 128
     target_update_freq = 100
-    warmup_steps = 1000
+    warmup_steps = 2000
     tau = 0.005
+    reward_scale = 0.01
+    normalize_states = True
 
     runs = 1
-    episodes = 100
+    episodes = 300
 
     os.makedirs("outputs", exist_ok=True)
     os.makedirs("models", exist_ok=True)
@@ -295,7 +370,7 @@ def run_dqn_experiment():
         min_green=5,
         delta_time=5,
         out_csv_name="outputs/big_intersection_dqn",
-        single_agent=True
+        single_agent=True,
     )
 
     state_dim = env.observation_space.shape[0]
@@ -325,6 +400,8 @@ def run_dqn_experiment():
             use_prioritized=True,
             warmup_steps=warmup_steps,
             tau=tau,
+            reward_scale=reward_scale,
+            normalize_states=normalize_states,
         )
 
         run_rewards = []
@@ -366,22 +443,38 @@ def run_dqn_experiment():
                 state = next_state
                 steps += 1
 
+            if np.isnan(episode_reward) or np.isnan(episode_loss):
+                print(f"NaN detected at episode {ep}. Stopping.")
+                break
+
             run_rewards.append(episode_reward)
             avg_loss = episode_loss / max(loss_count, 1)
 
             avg_reward_10 = np.mean(run_rewards[-10:]) if len(run_rewards) >= 10 else np.mean(run_rewards)
+            avg_reward_50 = np.mean(run_rewards[-50:]) if len(run_rewards) >= 50 else np.mean(run_rewards)
+
+            current_lr = agent.optimizer.param_groups[0]['lr']
 
             print(f"Ep {ep:3d}/{episodes} | "
                   f"Reward: {episode_reward:8.2f} | "
                   f"Avg10: {avg_reward_10:8.2f} | "
+                  f"Avg50: {avg_reward_50:8.2f} | "
                   f"Loss: {avg_loss:.4f} | "
                   f"Eps: {agent.epsilon:.3f} | "
+                  f"LR: {current_lr:.2e} | "
                   f"Steps: {steps:4d} | "
                   f"Buffer: {len(agent.replay_buffer):6d}")
 
             if episode_reward > best_reward:
                 best_reward = episode_reward
                 agent.save(f"models/dqn_run{run}_best.pth")
+
+            if ep >= 100 and ep % 50 == 0:
+                recent_avg = np.mean(run_rewards[-50:])
+                older_avg = np.mean(run_rewards[-100:-50])
+                if abs(recent_avg - older_avg) < abs(older_avg) * 0.02 and agent.epsilon <= epsilon_end + 0.01:
+                    print(f"Early stopping: converged at episode {ep}")
+                    break
 
         all_rewards.append(run_rewards)
 
@@ -395,6 +488,7 @@ def run_dqn_experiment():
         print(f"Run {run + 1}: Mean={np.mean(rewards):.2f}, "
               f"Std={np.std(rewards):.2f}, "
               f"Max={np.max(rewards):.2f}, "
+              f"Min={np.min(rewards):.2f}, "
               f"Last10={np.mean(rewards[-10:]):.2f}")
 
     env.close()
