@@ -342,22 +342,22 @@ class DQNAgent:
 
 
 def run_dqn_experiment():
-    hidden_dim = 256
-    lr = 1e-4
+    hidden_dim = 128
+    lr = 3e-4
     gamma = 0.95
     epsilon_start = 1.0
     epsilon_end = 0.05
-    epsilon_decay_steps = 30000
-    buffer_size = 100000
-    batch_size = 128
+    epsilon_decay_steps = 10000
+    buffer_size = 50000
+    batch_size = 64
     target_update_freq = 100
-    warmup_steps = 2000
-    tau = 0.005
+    warmup_steps = 500
+    tau = 0.01
     reward_scale = 0.01
     normalize_states = True
 
     runs = 1
-    episodes = 300
+    episodes = 50
 
     os.makedirs("outputs", exist_ok=True)
     os.makedirs("models", exist_ok=True)
@@ -366,7 +366,7 @@ def run_dqn_experiment():
         net_file="big-intersection/big-intersection.net.xml",
         route_file="big-intersection/routes.rou.xml",
         use_gui=False,
-        num_seconds=5400,
+        num_seconds=1800,
         min_green=5,
         delta_time=5,
         out_csv_name="outputs/big_intersection_dqn",
