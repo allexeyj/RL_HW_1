@@ -368,9 +368,10 @@ def run_dqn_experiment():
         use_gui=False,
         num_seconds=1800,
         min_green=5,
-        delta_time=5,
+        delta_time=10,
         out_csv_name="outputs/big_intersection_dqn",
         single_agent=True,
+        sumo_warnings=False,
     )
 
     state_dim = env.observation_space.shape[0]
